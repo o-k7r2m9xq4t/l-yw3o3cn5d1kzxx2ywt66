@@ -1,5 +1,6 @@
 # Liste IP VPN ripulite per le liste dinamiche UniFi (SilianoNet, file 12 del progetto Homelab).
-# Ogni notte: az0 ip.txt senza commenti + server offuscati NordVPN dall'API ufficiale.
+# Ogni notte: az0 ip.txt senza commenti + server offuscati NordVPN dall'API ufficiale
+# + tutte.txt = az0 + NordVPN offuscati + X4BNet lists_vpn, unite (una sola lista per UniFi).
 # Se un download fallisce resta il file del giorno prima (e l'azione segnala l'errore via email).
 name: Aggiorna liste VPN
 
@@ -58,6 +59,30 @@ jobs:
               scrivi("nord-obf.txt", s); esito.append("nord-obf=%d" % len(s))
           except Exception as e:
               ok = False; esito.append("nord-obf ERRORE %s" % e)
+          try:
+              x = set()
+              for riga in get("https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt").splitlines():
+                  v = riga.split("#")[0].strip()
+                  if not v:
+                      continue
+                  try:
+                      n = ipaddress.ip_network(v, strict=False)
+                  except ValueError:
+                      continue
+                  if n.version == 4 and n.is_global:
+                      x.add(n)
+              if len(x) < 1000:
+                  raise ValueError("solo %d voci" % len(x))
+              tutte = set(x)
+              for nome in ("az0.txt", "nord-obf.txt"):
+                  if os.path.exists("liste/" + nome):
+                      tutte |= {ipaddress.ip_network(l.strip()) for l in open("liste/" + nome) if l.strip()}
+              unite = [str(n.network_address) if n.prefixlen == 32 else str(n) for n in ipaddress.collapse_addresses(tutte)]
+              if len(unite) > 100000:
+                  raise ValueError("%d voci, oltre il limite UniFi di 100000" % len(unite))
+              scrivi("tutte.txt", unite); esito.append("tutte=%d" % len(unite))
+          except Exception as e:
+              ok = False; esito.append("tutte ERRORE %s" % e)
           print(("OK " if ok else "ERRORE ") + datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC ") + " ".join(esito))
           sys.exit(0 if ok else 1)
           PY
