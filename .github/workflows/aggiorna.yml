@@ -1,6 +1,7 @@
 # Liste IP VPN ripulite per le liste dinamiche UniFi (SilianoNet, file 12 del progetto Homelab).
 # Ogni notte: az0 ip.txt senza commenti + server offuscati NordVPN dall'API ufficiale
-# + tutte.txt = az0 + NordVPN offuscati + X4BNet lists_vpn, unite (una sola lista per UniFi).
+# + tutte.txt = az0 + NordVPN offuscati + X4BNet lists_vpn, unite (una sola lista per UniFi)
+# + doh.txt = IP dei server DNS-over-HTTPS (dibdot), senza IP condivisi di Cloudflare/AWS.
 # Se un download fallisce resta il file del giorno prima (e l'azione segnala l'errore via email).
 name: Aggiorna liste VPN
 
@@ -83,6 +84,33 @@ jobs:
               scrivi("tutte.txt", unite); esito.append("tutte=%d" % len(unite))
           except Exception as e:
               ok = False; esito.append("tutte ERRORE %s" % e)
+          try:
+              # IP dei server DoH (dibdot), senza commenti. Esclusi gli IP condivisi di Cloudflare e AWS
+              # Global Accelerator: ospitano anche siti normali (i DoH li' sono gia' bloccati dal Pi-hole via DNS).
+              cdn = ["13.248.0.0/16", "75.2.0.0/16", "99.83.0.0/16"]
+              try:
+                  cdn += [l.strip() for l in get("https://www.cloudflare.com/ips-v4").splitlines() if l.strip()]
+              except Exception:
+                  cdn += ("173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 "
+                          "190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 "
+                          "104.24.0.0/14 172.64.0.0/13 131.0.72.0/22").split()
+              cdn = [ipaddress.ip_network(c) for c in cdn]
+              s = set()
+              for riga in get("https://raw.githubusercontent.com/dibdot/DoH-IP-blocklists/master/doh-ipv4.txt").splitlines():
+                  v = riga.split("#")[0].strip()
+                  if not v:
+                      continue
+                  try:
+                      ip = ipaddress.ip_address(v.split()[0])
+                  except ValueError:
+                      continue
+                  if ip.version == 4 and ip.is_global and not any(ip in c for c in cdn):
+                      s.add(str(ip))
+              if len(s) < 500:
+                  raise ValueError("solo %d voci" % len(s))
+              scrivi("doh.txt", s); esito.append("doh=%d" % len(s))
+          except Exception as e:
+              ok = False; esito.append("doh ERRORE %s" % e)
           print(("OK " if ok else "ERRORE ") + datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC ") + " ".join(esito))
           sys.exit(0 if ok else 1)
           PY
