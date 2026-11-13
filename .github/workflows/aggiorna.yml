@@ -6,7 +6,7 @@ name: Aggiorna liste VPN
 
 on:
   schedule:
-    - cron: "17 3 * * *"   # 03:17 UTC, ogni giorno
+    - cron: "17 7 * * *"   # 07:17 UTC (08:17 in Italia), dopo l'aggiornamento di az0 (~06:15 UTC) e prima del download di UniFi
   workflow_dispatch:        # pulsante "Run workflow" per lanciarla a mano
 
 permissions:
