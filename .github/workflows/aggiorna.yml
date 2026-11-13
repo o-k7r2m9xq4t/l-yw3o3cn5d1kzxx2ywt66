@@ -1,0 +1,81 @@
+# Liste IP VPN ripulite per le liste dinamiche UniFi (SilianoNet, file 12 del progetto Homelab).
+# Ogni notte: az0 ip.txt senza commenti + server offuscati NordVPN dall'API ufficiale.
+# Se un download fallisce resta il file del giorno prima (e l'azione segnala l'errore via email).
+name: Aggiorna liste VPN
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 03:17 UTC, ogni giorno
+  workflow_dispatch:        # pulsante "Run workflow" per lanciarla a mano
+
+permissions:
+  contents: write
+
+jobs:
+  aggiorna:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scarica e ripulisci le liste
+        id: liste
+        continue-on-error: true
+        run: |
+          mkdir -p liste
+          python3 - <<'PY'
+          import ipaddress, json, os, sys, urllib.request, datetime
+          UA = {"User-Agent": "vpn-liste/1.0 (github action)"}
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                  return r.read().decode("utf-8", "replace")
+          def scrivi(nome, voci):
+              voci = sorted(voci, key=lambda x: ipaddress.ip_network(x, strict=False))
+              with open("liste/" + nome, "w") as f:
+                  f.write("\n".join(voci) + "\n")
+          esito, ok = [], True
+          try:
+              s = set()
+              for riga in get("http://az0-vpnip-public.oooninja.com/ip.txt").splitlines():
+                  v = riga.split("#")[0].strip()
+                  if not v:
+                      continue
+                  try:
+                      n = ipaddress.ip_network(v, strict=False)
+                  except ValueError:
+                      continue
+                  if n.version == 4 and n.is_global:
+                      s.add(str(n.network_address) if n.prefixlen == 32 else str(n))
+              if len(s) < 1000:
+                  raise ValueError("solo %d voci" % len(s))
+              scrivi("az0.txt", s); esito.append("az0=%d" % len(s))
+          except Exception as e:
+              ok = False; esito.append("az0 ERRORE %s" % e)
+          try:
+              d = json.loads(get("https://api.nordvpn.com/v1/servers?filters[servers_groups][identifier]=legacy_obfuscated_servers&limit=5000"))
+              s = {x["station"] for x in d if ipaddress.ip_address(x["station"]).version == 4}
+              if len(s) < 10:
+                  raise ValueError("solo %d server" % len(s))
+              scrivi("nord-obf.txt", s); esito.append("nord-obf=%d" % len(s))
+          except Exception as e:
+              ok = False; esito.append("nord-obf ERRORE %s" % e)
+          print(("OK " if ok else "ERRORE ") + datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC ") + " ".join(esito))
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Pubblica se cambiate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add liste/
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "Liste aggiornate $(date -u +%F)"
+            git push
+          fi
+
+      - name: Segnala errore di download
+        if: steps.liste.outcome == 'failure'
+        run: |
+          echo "Almeno una lista non si e' aggiornata: resta la versione precedente."
+          exit 1
